@@ -25,6 +25,20 @@ int main() {
             assert(result == YES);
         }
         NSLog(@"Both independent purchase hooks passed");
+        NSFileManager *manager = NSFileManager.defaultManager;
+        NSString *group = [@"group.infusebypass.test." stringByAppendingString:NSUUID.UUID.UUIDString];
+        NSURL *container = [manager containerURLForSecurityApplicationGroupIdentifier:group];
+        assert(container);
+        for (NSString *directory in @[@"Library/Application Support", @"Library/Caches", @"Library/Preferences"]) {
+            assert([manager fileExistsAtPath:[[container URLByAppendingPathComponent:directory] path]]);
+        }
+        NSURL *cache = [container URLByAppendingPathComponent:@"Library/Caches"];
+        assert([manager removeItemAtURL:cache error:nil]);
+        assert([manager containerURLForSecurityApplicationGroupIdentifier:group]);
+        assert([manager fileExistsAtPath:cache.path]);
+        assert([manager containerURLForSecurityApplicationGroupIdentifier:@"../escape"] == nil);
+        assert([manager removeItemAtURL:container error:nil]);
+        NSLog(@"Local cache storage and partial-directory recreation passed");
     }
     return 0;
 }

@@ -92,42 +92,27 @@ static void IBReplaceMethod(Class target, SEL selector, Class replacementClass, 
     return YES;
 }
 - (NSURL *)containerURLForSecurityApplicationGroupIdentifier:(NSString *)groupIdentifier {
-    NSString *homeDirectory = NSHomeDirectory();
-    NSString *containerBasePath = [homeDirectory stringByAppendingPathComponent:@"Documents/ApplicationGroupContainers"];
-    NSURL *baseURL = [NSURL fileURLWithPath:containerBasePath isDirectory:YES];
-    NSURL *containerURL = [baseURL URLByAppendingPathComponent:groupIdentifier];
-
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *containerPath = [containerURL path];
-    BOOL containerExists = [fileManager fileExistsAtPath:containerPath];
-
-    if (!containerExists) {
-        NSError *error = nil;
-
-        [fileManager createDirectoryAtURL:containerURL
-               withIntermediateDirectories:YES
-                                attributes:nil
-                                     error:&error];
-
-        NSURL *appSupportURL = [containerURL URLByAppendingPathComponent:@"Library/Application Support"];
-        [fileManager createDirectoryAtURL:appSupportURL
-               withIntermediateDirectories:YES
-                                attributes:nil
-                                     error:&error];
-
-        NSURL *cachesURL = [containerURL URLByAppendingPathComponent:@"Library/Caches"];
-        [fileManager createDirectoryAtURL:cachesURL
-               withIntermediateDirectories:YES
-                                attributes:nil
-                                     error:&error];
-
-        NSURL *preferencesURL = [containerURL URLByAppendingPathComponent:@"Library/Preferences"];
-        [fileManager createDirectoryAtURL:preferencesURL
-               withIntermediateDirectories:YES
-                                attributes:nil
-                                     error:&error];
+    if (!groupIdentifier.length || [groupIdentifier containsString:@"/"] ||
+        [groupIdentifier isEqualToString:@"."] || [groupIdentifier isEqualToString:@".."]) {
+        return nil;
     }
-
+    // tvOS supports local cache storage; Documents is not writable on older tvOS.
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    NSURL *cacheURL = [[fileManager URLsForDirectory:NSCachesDirectory inDomains:NSUserDomainMask] firstObject];
+    if (!cacheURL) {
+        return nil;
+    }
+    NSURL *baseURL = [cacheURL URLByAppendingPathComponent:@"ApplicationGroupContainers" isDirectory:YES];
+    NSURL *containerURL = [baseURL URLByAppendingPathComponent:groupIdentifier];
+    // Recreate individual subdirectories even if tvOS purged only part of a cache.
+    for (NSString *directory in @[@"", @"Library/Application Support", @"Library/Caches", @"Library/Preferences"]) {
+        NSURL *directoryURL = directory.length ? [containerURL URLByAppendingPathComponent:directory] : containerURL;
+        NSError *error = nil;
+        if (![fileManager createDirectoryAtURL:directoryURL withIntermediateDirectories:YES attributes:nil error:&error]) {
+            NSLog(@"Infuse Bypass could not create local app-group storage: %@", error);
+            return nil;
+        }
+    }
     return containerURL;
 }
 + (id)defaultContainer {

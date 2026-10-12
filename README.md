@@ -31,7 +31,7 @@ For a private or signed download URL, add a repository Actions secret named **`I
 3. Sign/install using your own Apple ID and a tvOS provisioning profile. The signing tool must re-sign the app **and all embedded frameworks**. Do not add the bypass framework again; the action already injected it.
 4. Your Apple TV must run at least the **Minimum tvOS** shown in the run summary. The original application's requirement is preserved; the injected framework targets tvOS 13.0.
 
-Top Shelf/app extensions are removed by default to simplify signing with personal accounts. Use `keep_extensions` only when your signing tool can provision and re-sign every extension and supply its required entitlements. The upstream hooks disable CloudKit access and redirect app-group storage into the app sandbox; iCloud synchronization and real shared app groups are unavailable.
+Top Shelf/app extensions are removed by default to simplify signing with personal accounts. Use `keep_extensions` only when your signing tool can provision and re-sign every extension and supply its required entitlements. The upstream hooks disable CloudKit access; iCloud synchronization and real shared app groups are unavailable. Local app-group storage uses the app's `Library/Caches/ApplicationGroupContainers` directory so it can be written on tvOS. This data can be purged by the OS; see [Apple's file-system guidance](https://developer.apple.com/documentation/foundation/using-the-file-system-effectively).
 
 ## Validation and compatibility
 
