@@ -12,6 +12,22 @@
 @interface InfuseBypass : NSObject
 @end
 
+// Install each replacement independently. Exchanging the same replacement
+// twice makes the second target receive the first target's original method.
+static void IBReplaceMethod(Class target, SEL selector, Class replacementClass, SEL replacementSelector) {
+    Method original = class_getInstanceMethod(target, selector);
+    Method replacement = class_getInstanceMethod(replacementClass, replacementSelector);
+    if (!original || !replacement) {
+        return;
+    }
+    // Adding first also avoids changing a superclass's inherited method.
+    IMP implementation = method_getImplementation(replacement);
+    const char *encoding = method_getTypeEncoding(original);
+    if (!class_addMethod(target, selector, implementation, encoding)) {
+        class_replaceMethod(target, selector, implementation, encoding);
+    }
+}
+
 @implementation InfuseBypass
 
 + (void)load {
@@ -23,7 +39,7 @@
     Method swizzledIapMethod = class_getInstanceMethod(HookClass, @selector(returnTrue));
 
     if (originalIapMethod && swizzledIapMethod) {
-        method_exchangeImplementations(originalIapMethod, swizzledIapMethod);
+        IBReplaceMethod(iapClass, NSSelectorFromString(@"iapVersionStatus"), HookClass, @selector(returnTrue));
     }
 
     // Hook Swift -[Infuse.InAppPurchaseServiceFreemiumSK2 iapVersionStatus]
@@ -32,7 +48,7 @@
     Method swizzledSwiftIapMethod = class_getInstanceMethod(HookClass, @selector(returnTrue));
 
     if (originalSwiftIapMethod && swizzledSwiftIapMethod) {
-        method_exchangeImplementations(originalSwiftIapMethod, swizzledSwiftIapMethod);
+        IBReplaceMethod(swiftIapClass, NSSelectorFromString(@"iapVersionStatus"), HookClass, @selector(returnTrue));
     }
 
     // Hook -[Infuse.InAppPurchaseServiceFreemiumSK2 isFeaturePurchased:tillDate:]
@@ -40,7 +56,7 @@
     Method swizzledSK2PurchaseMethod = class_getInstanceMethod(HookClass, @selector(isFeaturePurchased:tillDate:));
 
     if (originalSK2PurchaseMethod && swizzledSK2PurchaseMethod) {
-        method_exchangeImplementations(originalSK2PurchaseMethod, swizzledSK2PurchaseMethod);
+        IBReplaceMethod(swiftIapClass, @selector(isFeaturePurchased:tillDate:), HookClass, @selector(isFeaturePurchased:tillDate:));
     }
 
     // Hook NSFileManager containerURLForSecurityApplicationGroupIdentifier:
@@ -49,7 +65,7 @@
     Method swizzledFMMethod = class_getInstanceMethod(HookClass, @selector(containerURLForSecurityApplicationGroupIdentifier:));
 
     if (originalFMMethod && swizzledFMMethod) {
-        method_exchangeImplementations(originalFMMethod, swizzledFMMethod);
+        IBReplaceMethod(fileManagerClass, @selector(containerURLForSecurityApplicationGroupIdentifier:), HookClass, @selector(containerURLForSecurityApplicationGroupIdentifier:));
     }
     // Hook CKContainer defaultContainer
     Class cloudKitClass = objc_getClass("CKContainer");
@@ -57,7 +73,7 @@
     Method swizzledDefaultMethod = class_getClassMethod(HookClass, @selector(defaultContainer));
 
     if (originalDefaultMethod && swizzledDefaultMethod) {
-        method_exchangeImplementations(originalDefaultMethod, swizzledDefaultMethod);
+        IBReplaceMethod(object_getClass(cloudKitClass), @selector(defaultContainer), object_getClass(HookClass), @selector(defaultContainer));
     }
 
     // Hook CKContainer containerWithIdentifier:
@@ -65,7 +81,7 @@
     Method swizzledIdentifierMethod = class_getClassMethod(HookClass, @selector(containerWithIdentifier:));
 
     if (originalIdentifierMethod && swizzledIdentifierMethod) {
-        method_exchangeImplementations(originalIdentifierMethod, swizzledIdentifierMethod);
+        IBReplaceMethod(object_getClass(cloudKitClass), @selector(containerWithIdentifier:), object_getClass(HookClass), @selector(containerWithIdentifier:));
     }
 }
 

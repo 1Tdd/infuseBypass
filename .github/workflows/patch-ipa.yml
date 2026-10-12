@@ -1,0 +1,90 @@
+name: Patch uploaded tvOS IPA
+run-name: Patch tvOS IPA from ${{ inputs.ipa_source }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ipa_source:
+        description: Where you uploaded your own decrypted tvOS IPA
+        type: choice
+        options: [release, url]
+        default: release
+        required: true
+      release_tag:
+        description: Release source only - tag of the upload draft release
+        type: string
+        default: ipa-input
+      ipa_asset:
+        description: Release source only - exact uploaded IPA filename
+        type: string
+        default: Infuse.ipa
+      ipa_url:
+        description: URL source only - direct HTTPS file download link
+        type: string
+      ipa_sha256:
+        description: Optional expected SHA-256 of your input IPA
+        type: string
+      keep_extensions:
+        description: Keep Top Shelf extensions (requires a signer supporting their profiles and entitlements)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  patch:
+    runs-on: macos-15
+    timeout-minutes: 40
+    # Write access permits reading private draft assets and saving the output
+    # as a draft release with a direct .ipa download (no artifact ZIP wrapper).
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out patcher
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Download your IPA
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IPA_SOURCE: ${{ inputs.ipa_source }}
+          IPA_RELEASE: ${{ inputs.release_tag }}
+          IPA_ASSET: ${{ inputs.ipa_asset }}
+          IPA_URL: ${{ inputs.ipa_url || secrets.IPA_DOWNLOAD_URL }}
+          IPA_SHA256: ${{ inputs.ipa_sha256 }}
+        run: python3 scripts/download_ipa.py "$RUNNER_TEMP/input.ipa"
+      - name: Build arm64 tvOS framework and insertion tool
+        run: bash scripts/build.sh
+      - name: Validate, inject, and package IPA
+        env:
+          KEEP_EXTENSIONS: ${{ inputs.keep_extensions }}
+        run: |
+          options=()
+          if [[ "$KEEP_EXTENSIONS" == "true" ]]; then options+=(--keep-extensions); fi
+          python3 scripts/ipa.py \
+            --ipa "$RUNNER_TEMP/input.ipa" \
+            --work "$RUNNER_TEMP/ipa-work" \
+            --framework build/products/Release-appletvos/InfuseBypass.framework \
+            --insert-dylib "$PWD/build/tools/insert_dylib" \
+            --output dist/Infuse_patched_unsigned.ipa "${options[@]}"
+      - name: Save the final IPA as a direct download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="ipa-output-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat > "$RUNNER_TEMP/output-notes.md" <<'NOTES'
+          Download **Infuse_patched_unsigned.ipa** directly from the assets below.
+          Sign and install it locally with Sideloadly using your Apple ID.
+          This release stays a draft. ZIP structure and tvOS binaries were checked;
+          installation and launch on a physical Apple TV still require device testing.
+          NOTES
+          release_url=$(gh release create "$tag" \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft \
+            --title "Patched tvOS IPA - run $GITHUB_RUN_ID" \
+            --notes-file "$RUNNER_TEMP/output-notes.md" \
+            dist/Infuse_patched_unsigned.ipa dist/Infuse_patched_unsigned.json dist/Infuse_patched_unsigned.sha256)
+          printf '\n[Download the final IPA from the draft release](%s)\n' "$release_url" >> "$GITHUB_STEP_SUMMARY"

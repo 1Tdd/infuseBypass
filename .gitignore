@@ -3,3 +3,7 @@ build/
 packages/
 *.deb
 .DS_Store
+*.ipa
+__pycache__/
+work/
+dist/
