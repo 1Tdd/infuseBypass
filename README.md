@@ -39,6 +39,7 @@ The workflow checks:
 
 - An actual tvOS device app (`AppleTVOS`, device family 3, `com.firecore.infuse`), with a generic arm64 executable and a valid minimum OS version.
 - Every embedded Mach-O for encryption. An encrypted input fails with a clear error; there is no decryption step.
+- Previously injected `InfusePlus.dylib` and `CydiaSubstrate.framework` are removed before installing the native tvOS bypass. Removal requires trailing executable dependencies with no symbol imports into them, and no dependencies from retained frameworks/extensions. Apple's `dyld_info` checks that the app's imports remain identical. Other incompatible embedded libraries still fail validation. Use a clean IPA if an old tweak cannot be removed safely.
 - Safe ZIP paths, duplicate entries, and file types; symlinks and special files are rejected. Device frameworks must use flat bundles.
 - Old binary signatures, signature directories, and provisioning profiles are removed before local re-signing.
 - Exactly one load command for the embedded arm64 tvOS framework. The insertion tool is instructed to refuse overwriting nonempty header padding.

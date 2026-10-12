@@ -51,3 +51,39 @@ ipa.patch(Namespace(**{**vars(args), "ipa": output, "work": root / "repatched", 
 ipa.patch(Namespace(**{**vars(args), "work": root / "kept", "output": root / "Kept.ipa", "keep_extensions": True}))
 assert (root / "kept/Payload/User Infuse.app/PlugIns/Test.appex/Test").is_file()
 print("Real tvOS build, signature removal, injection, repack, re-signing, and repeated patch passed")
+
+# Reproduce an already-tweaked tvOS app carrying iOS InfusePlus/Substrate.
+legacy_root = root / "legacy-original"
+shutil.copytree(root / "original", legacy_root)
+legacy_app = legacy_root / "Payload/User Infuse.app"
+legacy_main = legacy_app / "Player With Space"
+ios_sdk = subprocess.check_output(["xcrun", "--sdk", "iphoneos", "--show-sdk-path"], text=True).strip()
+legacy_source = root / "legacy.c"
+legacy_source.write_text("int synthetic_injected_feature(void) { return 1; }\n")
+substrate = legacy_app / "Frameworks/CydiaSubstrate.framework/CydiaSubstrate"
+substrate.parent.mkdir(parents=True)
+(substrate.parent / "Info.plist").write_bytes(plistlib.dumps({
+    "CFBundlePackageType": "FMWK", "CFBundleIdentifier": "test.synthetic.substrate",
+    "CFBundleExecutable": "CydiaSubstrate", "CFBundleSupportedPlatforms": ["iPhoneOS"]}))
+ipa.run("xcrun", "clang", "-dynamiclib", "-target", "arm64-apple-ios13.0", "-isysroot", ios_sdk,
+        "-Wl,-install_name,@rpath/CydiaSubstrate.framework/CydiaSubstrate", legacy_source, "-o", substrate)
+old_tweak = legacy_app / "Frameworks/InfusePlus.dylib"
+ipa.run("xcrun", "clang", "-dynamiclib", "-target", "arm64-apple-ios13.0", "-isysroot", ios_sdk,
+        "-Wl,-install_name,@rpath/InfusePlus.dylib", "-Wl,-needed_library," + str(substrate),
+        legacy_source, "-o", old_tweak)
+ipa.run("codesign", "--remove-signature", legacy_main)
+ipa.run(args.insert_dylib, "--inplace", "--no-strip-codesig", "@rpath/InfusePlus.dylib", legacy_main,
+        input="n\n", text=True)
+ipa.run("codesign", "--force", "--sign", "-", legacy_main)
+legacy_input = root / "Synthetic_legacy_input.ipa"
+ipa.pack(legacy_root, legacy_input)
+legacy_output = root / "Synthetic_legacy_patched.ipa"
+ipa.patch(Namespace(**{**vars(args), "ipa": legacy_input, "work": root / "legacy-cleaned",
+                       "output": legacy_output, "keep_extensions": True}))
+cleaned_app, cleaned_main, _, _ = ipa.inspect_app(root / "legacy-cleaned", patched=True)
+assert not (cleaned_app / "Frameworks/InfusePlus.dylib").exists()
+assert not (cleaned_app / "Frameworks/CydiaSubstrate.framework").exists()
+assert "@rpath/InfusePlus.dylib" not in ipa.macho(cleaned_main.read_bytes())[0]["loads"]
+ipa.run("codesign", "--force", "--sign", "-", cleaned_main)
+ipa.run("codesign", "--verify", "--strict", cleaned_main)
+print("iOS legacy tweak cleanup, preserved imports, native tvOS replacement, and re-signing passed")

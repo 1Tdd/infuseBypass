@@ -6,6 +6,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
@@ -13,11 +14,11 @@ import ipa
 import download_ipa
 
 
-def binary(platform=3, encrypted=0, load=None, filetype=2):
+def binary(platform=3, encrypted=0, load=None, filetype=2, loads=None):
     commands = [struct.pack("<6I", 0x32, 24, platform, 13 << 16, 18 << 16, 0),
                 struct.pack("<6I", 0x2C, 24, 0, 0, encrypted, 0)]
-    if load:
-        name = load.encode() + b"\0"
+    for value in loads if loads is not None else ([load] if load else []):
+        name = value.encode() + b"\0"
         name += b"\0" * (-len(name) % 8)
         commands.append(struct.pack("<6I", 0xC, 24 + len(name), 24, 0, 0, 0) + name)
     return struct.pack("<8I", 0xFEEDFACF, ipa.ARM64, 0, filetype, len(commands),
@@ -124,6 +125,51 @@ class IPATests(unittest.TestCase):
     def test_private_url_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "public Internet"):
             download_ipa.check_url("https://127.0.0.1/app.ipa")
+
+    def test_legacy_cleanup_exception_is_temporary_and_specific(self):
+        app, _, _, _ = self.inspect()
+        substrate = app / "Frameworks/CydiaSubstrate.framework/CydiaSubstrate"
+        substrate.parent.mkdir(parents=True)
+        substrate.write_bytes(binary(platform=2, filetype=6))
+        with self.assertRaisesRegex(ipa.InvalidIPA, "Not an arm64 tvOS"):
+            ipa.inspect_app(self.root / "extracted")
+        ipa.inspect_app(self.root / "extracted", allow_legacy_cleanup=True)
+        unrelated = app / "Frameworks/Unrelated.dylib"
+        unrelated.write_bytes(binary(platform=2, filetype=6))
+        with self.assertRaisesRegex(ipa.InvalidIPA, "Not an arm64 tvOS"):
+            ipa.inspect_app(self.root / "extracted", allow_legacy_cleanup=True)
+
+    def test_unused_trailing_injection_can_be_removed(self):
+        executable = self.root / "Player"
+        old_load = "@rpath/InfusePlus.dylib"
+        original = binary(loads=["/usr/lib/libSystem.B.dylib", old_load]) + b"UNCHANGED_SECTION_DATA"
+        executable.write_bytes(original)
+        imports = "-imports:\n  _puts (from libSystem)\n"
+        with mock.patch.object(ipa, "imports_for", return_value=imports):
+            self.assertEqual(ipa.remove_unused_loads(executable, {old_load}), [old_load])
+        result = executable.read_bytes()
+        self.assertEqual(len(result), len(original))
+        self.assertEqual(ipa.macho(result)[0]["loads"], ["/usr/lib/libSystem.B.dylib"])
+        self.assertTrue(result.endswith(b"UNCHANGED_SECTION_DATA"))
+
+    def test_injection_with_symbol_imports_is_not_removed(self):
+        executable = self.root / "Player"
+        old_load = "@rpath/InfusePlus.dylib"
+        original = binary(load=old_load)
+        executable.write_bytes(original)
+        with mock.patch.object(ipa, "imports_for", return_value="-imports:\n _injected (from InfusePlus)\n"):
+            with self.assertRaisesRegex(ipa.InvalidIPA, "imports symbols"):
+                ipa.remove_unused_loads(executable, {old_load})
+        self.assertEqual(executable.read_bytes(), original)
+
+    def test_middle_injection_is_not_removed(self):
+        executable = self.root / "Player"
+        old_load = "@rpath/InfusePlus.dylib"
+        original = binary(loads=[old_load, "/usr/lib/libSystem.B.dylib"])
+        executable.write_bytes(original)
+        with self.assertRaisesRegex(ipa.InvalidIPA, "trailing dependency"):
+            ipa.remove_unused_loads(executable, {old_load})
+        self.assertEqual(executable.read_bytes(), original)
 
 
 if __name__ == "__main__":
