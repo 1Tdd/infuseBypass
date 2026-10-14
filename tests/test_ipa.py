@@ -122,6 +122,12 @@ class IPATests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 download_ipa.check_url(url)
 
+    def test_normalize_dropbox_url(self):
+        url = "https://www.dropbox.com/scl/fi/abc/test.ipa?rlkey=xyz&dl=0"
+        normalized = download_ipa.normalize_url(url)
+        self.assertIn("dl=1", normalized)
+        self.assertNotIn("dl=0", normalized)
+
     def test_private_url_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "public Internet"):
             download_ipa.check_url("https://127.0.0.1/app.ipa")

@@ -17,6 +17,19 @@ import urllib.request
 MAX_BYTES = 2 * 1024**3
 
 
+def normalize_url(url):
+    parsed = urllib.parse.urlsplit(url)
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "dropbox.com" or hostname.endswith(".dropbox.com"):
+        query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+        query = [(k, v) for k, v in query if k != "dl"]
+        query.append(("dl", "1"))
+        new_query = urllib.parse.urlencode(query)
+        parsed = parsed._replace(query=new_query)
+        return urllib.parse.urlunsplit(parsed)
+    return url
+
+
 def check_url(url):
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
@@ -75,6 +88,7 @@ def download(output):
             expected = release_hash
     elif source == "url":
         url = os.environ.get("IPA_URL", "").strip()
+        url = normalize_url(url)
         if os.environ.get("GITHUB_ACTIONS") == "true" and url:
             # Mask signed links before anything could print them.
             escaped = url.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
